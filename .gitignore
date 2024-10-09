@@ -1,0 +1,8 @@
+__pycache__
+.ipynb_checkpoints
+.dropbox
+Icon?
+*.DS_Store
+test
+uci/results
+legacy
