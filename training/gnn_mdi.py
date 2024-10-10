@@ -3,49 +3,63 @@ import torch
 import torch.nn.functional as F
 import pickle
 from tqdm import tqdm
-# import wandb
 
 from models.gnn_model import get_gnn
-# from models.old_stuff.predict_backup import MLPNet
 from models.prediction_model import ImputeNet
 from utils.plot_utils import plot_curve, plot_sample
 from utils.utils import build_optimizer, objectview, get_known_mask, mask_edge
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+def get_known_A_during_training(A, Known_Mask, train_removed_edges, tgt_v, n_of_record=None, device=None, epsilon=1e-4):
+    A = A.clone().detach().to(device)
+    Known_Mask = Known_Mask.clone().detach().to(device)
+
+    # remove duplicated results:
+    idx = eliminate_feature_index(train_removed_edges[0], tgt_v=tgt_v)
+    # only select the parts that are missing in this training epoch:
+    rows, cols = train_removed_edges[0][:idx], train_removed_edges[1][:idx]
+
+    # as feature node index start from n_of_record, we need to offset cols by n_of_record to make its index start from 0:
+    cols = cols - n_of_record
+    
+    A[rows, cols] = epsilon     # we delete the positions that are not observable in this training epoch from A, (assign epsilon for init)
+    Known_Mask[rows, cols] = 0  # we delete the positions that are not observable in this training epoch from A, (assign 0 for FCU, SCU)
+
+    return A, Known_Mask
+
+
+def eliminate_feature_index(list_of_index, tgt_v):
+    """
+    Since list_of_index is sorted (i.e. [1,2,3,4,5]), we want to use Binary search to find the first position $i$, 
+    such that list_of_index[i-1] < tgt_v <= list_of_index[i]
+    """
+    return torch.searchsorted(list_of_index, tgt_v, right=False)
+
+def reconstruct_known_missing_A(shape, edges, attr, n_of_record, epsilon=1e-4, device=None, idx=None):
+    # Build a matrix of shape: (Num of record, num of feature) 
+    # initially, fill in value with nan
+    A = torch.full(shape, torch.nan, requires_grad=False).to(device)
+    # also, we create a pure 0, 1 known matrix for scu and fcu:
+    M = torch.zeros(shape, requires_grad=False).to(device)
+
+    # remove duplicated results:
+    rows, cols = edges[0][:idx], edges[1][:idx]
+    # as feature node index start from n_of_record, we need to offset cols by n_of_record to make its index start from 0:
+    cols = cols - n_of_record
+
+    # assign observable values:
+    A[rows, cols] = attr.squeeze(-1)[:idx]
+
+    M[rows, cols] = 1
+
+    # Assign missing values epislon:
+    A[torch.isnan(A)] = epsilon
+    
+    return A, M
+
+
 def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu'), print_train_log=False):
-
-    # WANDB INIT
-
-    # wandb.init(
-    #     # set the wandb project where this run will be logged
-    #     project="cherry-full",
-    #     entity="cherry-exp",
-    #     tags=args.tag.split(","),
-        
-    #     # track hyperparameters and run metadata
-    #     config={
-    #         "architecture": "CHERRY",
-    #         "epochs": args.epochs,
-    #         "sample-peer-size": args.sample_peer_size,
-    #         "init-pseudo-edge-weight": args.init_epsilon,
-    #         "sample_strategy": "cos" if args.sample_strategy == "cos-similarity" else "random",
-    #         "node_dim": args.node_dim,
-    #         "edge_dim": args.edge_dim,
-    #         "impute_hiddens": args.impute_hiddens,
-    #         "known": args.known,
-    #         "train_edge": args.train_edge,
-    #         "dataset": args.data,
-    #         "apply_attr": args.apply_attr,
-    #         "apply_peer": args.apply_peer,
-    #         "split_train": args.split_train,
-    #         "split_sample": args.split_sample,
-    #         "repeat": run_iter_num
-    #     }
-    # )
-    
-    # END WANDB
-    
     model = get_gnn(data, args, device).to(device)
     if args.impute_hiddens == '':
         impute_hiddens = []
@@ -62,20 +76,6 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
     
     num_nodes, num_feature = data.x.shape
     num_record = num_nodes - num_feature
-
-    __log_attn_score = torch.zeros(num_feature, num_feature)
-    
-    # impute_model = MLPNet(input_dim, output_dim,
-    #                         hidden_layer_sizes=impute_hiddens,
-    #                         hidden_activation=args.impute_activation,
-    #                         dropout=args.dropout).to(device)
-    
-    # if args.transfer_dir: # this ensures the valid mask is consistant
-    #     load_path = './{}/test/{}/{}/'.format(args.domain,args.data,args.transfer_dir)
-    #     print("loading fron {} with {}".format(load_path,args.transfer_extra))
-    #     model = torch.load(load_path+'model'+args.transfer_extra+'.pt',map_location=device)
-    #     impute_model = torch.load(load_path+'impute_model'+args.transfer_extra+'.pt',map_location=device)
-
 
     # train
     Train_loss = []
@@ -115,16 +115,16 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
         class_values = data.class_values.clone().detach().to(device)
     if args.valid > 0.:
         valid_mask = get_known_mask(args.valid, int(all_train_edge_attr.shape[0] / 2), args.masking_distribution).to(device)
-        print("valid mask sum: ",torch.sum(valid_mask))
+        # print("valid mask sum: ",torch.sum(valid_mask))
         train_labels = all_train_labels[~valid_mask]
         valid_labels = all_train_labels[valid_mask]
         double_valid_mask = torch.cat((valid_mask, valid_mask), dim=0)
         valid_edge_index, valid_edge_attr = mask_edge(all_train_edge_index, all_train_edge_attr, double_valid_mask, True)
         train_edge_index, train_edge_attr = mask_edge(all_train_edge_index, all_train_edge_attr, ~double_valid_mask, True)
-        print("train edge num is {}, valid edge num is {}, test edge num is input {} output {}"\
-                .format(
-                train_edge_attr.shape[0], valid_edge_attr.shape[0],
-                test_input_edge_attr.shape[0], test_edge_attr.shape[0]))
+        # print("train edge num is {}, valid edge num is {}, test edge num is input {} output {}"\
+                # .format(
+                # train_edge_attr.shape[0], valid_edge_attr.shape[0],
+                # test_input_edge_attr.shape[0], test_edge_attr.shape[0]))
         Valid_rmse = []
         Valid_l1 = []
         best_valid_rmse = np.inf
@@ -134,16 +134,26 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
     else:
         train_edge_index, train_edge_attr, train_labels =\
              all_train_edge_index, all_train_edge_attr, all_train_labels
-        print("train edge num is {}, test edge num is input {}, output {}"\
-                .format(
-                train_edge_attr.shape[0],
-                test_input_edge_attr.shape[0], test_edge_attr.shape[0]))
+        # print("train edge num is {}, test edge num is input {}, output {}"\
+                # .format(
+                # train_edge_attr.shape[0],
+                # test_input_edge_attr.shape[0], test_edge_attr.shape[0]))
     if args.auto_known:
         args.known = float(all_train_labels.shape[0])/float(all_train_labels.shape[0]+test_labels.shape[0])
-        print("auto calculating known is {}/{} = {:.3g}".format(all_train_labels.shape[0],all_train_labels.shape[0]+test_labels.shape[0],args.known))
+        # print("auto calculating known is {}/{} = {:.3g}".format(all_train_labels.shape[0],all_train_labels.shape[0]+test_labels.shape[0],args.known))
     obj = dict()
     obj['args'] = args
     obj['outputs'] = dict()
+    
+
+    # --------------------------------------------Start Training & Testing --------------------------------------------#
+    # 1. obtain the idx for the last record
+    tgt_v = torch.tensor([num_record], dtype=int, device=device)
+    idx = eliminate_feature_index(train_edge_index[0], tgt_v)
+    # 2. reconstruct adjacency matrix (Num_sample, num_feature)
+    # (1) Observable: fill in with edge value
+    # (2) Missing:    fill in with epsilon
+    A, Known_Mask = reconstruct_known_missing_A((num_record, num_feature), train_edge_index, train_edge_attr, num_record, device=device, idx=idx, epsilon=args.init_epsilon)
     
     impute_model = ImputeNet(hidden_dim = args.node_dim,
                                 num_of_record=num_record,
@@ -154,35 +164,45 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
                                 apply_relation=args.apply_attr,
                                 record_data=data.df_X,
                                 sample_strategy=args.sample_strategy,
-                                train_known_mask_and_attr=(all_train_edge_index, all_train_edge_attr),
                                 cos_sample_feature_embs=model.feature_nodes,
-                                drop_p=args.impute_nn_dropout)
+                                drop_p=args.impute_nn_dropout,
+                                running_on_very_large_dataset=args.very_large_dataset,
+                                sample_space_size=args.sample_space_size,
+                                attn_score=A)
 
     trainable_parameters = list(model.parameters()) \
                            + list(impute_model.parameters())
-    print("total trainable_parameters: ",len(trainable_parameters))
+    # print("total trainable_parameters: ",len(trainable_parameters))
     # build optimizer
     scheduler, opt = build_optimizer(args, trainable_parameters)
 
     for epoch in tqdm(range(args.epochs)):
-    # for epoch in range(args.epochs):
-        model.train()
-        impute_model.train()
+        model.train()               # GNN encoder
+        impute_model.train()        # Imputer
 
-        if args.sample_strategy == 'cos-similarity' and (epoch + 1) % args.update_cos_sample_prob_every == 0:
-            print('--------------------------------------')
-            impute_model.sim_info_net.update_cos_prob(model.feature_nodes)
+        # update cosine similarity every args.update_cos_sample_prob_every epochs:
+        if args.apply_peer == True and args.sample_strategy == 'cos-similarity' and (epoch + 1) % args.update_cos_sample_prob_every == 0:
+            print('[SRU] Update Sample Space')
+            impute_model.SRU.update_cos_prob(model.feature_nodes, Train_A)
 
+        # maskout edge during training :
         known_mask = get_known_mask(args.known, int(train_edge_attr.shape[0] / 2), args.masking_distribution).to(device)
         double_known_mask = torch.cat((known_mask, known_mask), dim=0)
-        known_edge_index, known_edge_attr = mask_edge(train_edge_index, train_edge_attr, double_known_mask, True)
-
-        opt.zero_grad()
-        x_embd = model(x, known_edge_attr, known_edge_index)    # Input shape: (#Obs + #Fea, #feature)
+        known_edge_index, known_edge_attr, removed_edge_index = mask_edge(train_edge_index, train_edge_attr, double_known_mask, True, keep_removed=True)
         
-        pred, _ = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:], known_edges=known_edge_index, impute_target_edges=train_edge_index)
-        # pred = impute_model([x_embd[train_edge_index[0]], x_embd[train_edge_index[1]]])
+        # reset grad
+        opt.zero_grad()
 
+        # get the reconstruct adjacency matrix for this training epoch, as some of the edges are mask out
+        # (1) Observable: fill in with edge value
+        # (2) Missing:    fill in with epsilon
+        Train_A, Train_Known_mask = get_known_A_during_training(A, Known_Mask, removed_edge_index, tgt_v, n_of_record=num_record, device=device, epsilon=args.init_epsilon)
+
+        # perform graph representation learning:
+        x_embd = model(x, known_edge_attr, known_edge_index, Train_A)    # Input shape: (#Obs + #Fea, #feature)
+        
+        # perform FCU, SCU:
+        pred, _ = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:], known_edges=known_edge_index, impute_target_edges=train_edge_index, known_mask=Train_Known_mask)
 
         if hasattr(args,'ce_loss') and args.ce_loss:
             pred_train = pred[:int(train_edge_attr.shape[0] / 2)]
@@ -208,9 +228,8 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
         impute_model.eval()
         with torch.no_grad():
             if args.valid > 0.:
-                x_embd = model(x, train_edge_attr, train_edge_index)
-                pred, _ = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:],known_edges=train_edge_index, impute_target_edges=valid_edge_index)
-                # pred = impute_model([x_embd[valid_edge_index[0], :], x_embd[valid_edge_index[1], :]])
+                x_embd = model(x, train_edge_attr, train_edge_index, A)
+                pred, _ = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:],known_edges=train_edge_index, impute_target_edges=valid_edge_index, known_mask=Known_Mask)
                 
                 if hasattr(args,'ce_loss') and args.ce_loss:
                     pred_valid = class_values[pred[:int(valid_edge_attr.shape[0] / 2)].max(1)[1]]
@@ -242,11 +261,9 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
                 Valid_rmse.append(valid_rmse)
                 Valid_l1.append(valid_l1)
 
-            x_embd = model(x, test_input_edge_attr, test_input_edge_index)
-            pred, _log_attn_score = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:],known_edges=test_input_edge_index, impute_target_edges=test_edge_index)
-            # __log_attn_score += _log_attn_score.to('cpu')     # 记录feature relation matrix
+            x_embd = model(x, test_input_edge_attr, test_input_edge_index, A)
+            pred, _ = impute_model(obs_nodes_embs=x_embd[: num_record], fea_nodes_embs=x_embd[num_record:],known_edges=test_input_edge_index, impute_target_edges=test_edge_index, known_mask=Known_Mask)
 
-            # pred = impute_model([x_embd[test_edge_index[0], :], x_embd[test_edge_index[1], :]])
             
             if hasattr(args,'ce_loss') and args.ce_loss:
                 pred_test = class_values[pred[:int(test_edge_attr.shape[0] / 2)].max(1)[1]]
@@ -284,7 +301,6 @@ def train_gnn_mdi(data, args, log_path, run_iter_num, device=torch.device('cpu')
                     print('valid l1: ', valid_l1)
                 print('test rmse: ', test_rmse)
                 print('test l1: ', test_l1)
-            # wandb.log({'train_loss':train_loss, 'test_rmse':test_rmse, 'test_l1':test_l1})
 
     pred_train = pred_train.detach().cpu().numpy()
     label_train = label_train.detach().cpu().numpy()

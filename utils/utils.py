@@ -167,15 +167,22 @@ def get_known_mask(known_prob, edge_num, mode="uniform"):
     return known_mask
     
 
-def mask_edge(edge_index,edge_attr,mask,remove_edge):
+def mask_edge(edge_index, edge_attr, mask, remove_edge, keep_removed=False):
     edge_index = edge_index.clone().detach()
     edge_attr = edge_attr.clone().detach()
+    removed_edges = None
     if remove_edge:
+        if keep_removed:
+            # we want to known which parts are deleted (i.e. the index of deleted elements:)
+            removed_edges = edge_index[:, ~mask]
         edge_index = edge_index[:,mask]
         edge_attr = edge_attr[mask]
     else:
         edge_attr[~mask] = 0.
-    return edge_index, edge_attr
+    if not keep_removed:
+        return edge_index, edge_attr
+    
+    return edge_index, edge_attr, removed_edges
 
 def one_hot(batch,depth):
     ones = torch.sparse.torch.eye(depth)

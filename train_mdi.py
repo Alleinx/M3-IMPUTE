@@ -54,13 +54,19 @@ def main():
     # for controling using unit:
     parser.add_argument('--apply_attr', action='store_true', default=False)
     parser.add_argument('--apply_peer', action='store_true', default=False)
-    parser.add_argument('--sample_peer_size', type=int, default=5)
     parser.add_argument('--init_epsilon', type=float, default=1e-4)
-    parser.add_argument('--sample_strategy', type=str, default='cosine-similarity')
+    parser.add_argument('--sample_peer_size', type=int, default=5)
+    parser.add_argument('--sample_strategy', type=str, default='random_sample') # choose from 'random_sample' and 'cos-similarity';
     parser.add_argument('--update_cos_sample_prob_every', type=int, default=100)
-    parser.add_argument('--tag', type=str, default="Placeholder Tag")
     parser.add_argument('--impute_nn_dropout', type=float, default=0.1)
+        # For very large dataset we need to optimize cos sampling
+        # if we store a NxN matrix, it would cause OOM
+        # thus, we store a NxK (i.e. --sample_space_size) cos similiaryt matrix, where K << N
+        # The space complexity will be reduced from O(N^2) to O(N x K)
+    parser.add_argument('--very_large_dataset', action='store_true', default=False)
+    parser.add_argument('--sample_space_size', type=int, default=20)
     
+    # for different missing pattern:
     parser.add_argument('--corrupt', type=str, default="mcar")
     parser.add_argument('--mar_rate_obs', type=float, default=0.1)
     parser.add_argument('--mar_rate_missing', type=float, default=0.15)
@@ -68,21 +74,21 @@ def main():
     
     subparsers = parser.add_subparsers()
     add_uci_subparser(subparsers)
-    add_mc_subparser(subparsers)
     args = parser.parse_args()
     print(args)
+    print('--'*20)
+    print(f'[Config] Missing Pattern: {args.corrupt}')
 
     # select device
     if torch.cuda.is_available():
-        cuda = auto_select_gpu()
+        # cuda = auto_select_gpu()                      # auto select most suitable GPU
+        cuda = args.gpu                                 # manual selection of gpu
+        print(f'[Config] Using GPU {args.gpu}')
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda)
-        # print('Using GPU {}'.format(os.environ['CUDA_VISIBLE_DEVICES']))
-        # device = torch.device('cuda:{}'.format(cuda))
-        print(f'Using GPU {args.gpu}')
         device = torch.device('cuda:{}'.format(args.gpu))
     else:
-        print('Using CPU')
+        print('[Config] Using CPU')
         device = torch.device('cpu')
 
     seed = args.seed
@@ -92,9 +98,9 @@ def main():
     if args.domain == 'uci':
         from uci.uci_data import load_data
         data = load_data(args)
-    elif args.domain == 'mc':
-        from mc.mc_data import load_data
-        data = load_data(args)
+    else:
+        raise Exception('Unsupported datasets.')
+
 
     log_path = './{}/test/{}/{}/'.format(args.domain,args.data,args.log_dir)
     if not os.path.exists(log_path):
@@ -105,6 +111,8 @@ def main():
         f.write(cmd_input)
 
     for run_iter_num in range(args.repeat_exp_num):
+        args.seed = run_iter_num
+        print(f'[Config] seed: {args.seed}')
         train_gnn_mdi(data, args, log_path, run_iter_num, device, print_train_log=args.display_log)
 
 
