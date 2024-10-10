@@ -19,9 +19,11 @@ def baseline_mdi(data, args, log_path):
             X = X[higher_y_index]
             X_incomplete = X_incomplete[higher_y_index]
     t_load = time.time()
+    # print(f'load time: {t_load - t0}')
 
-    X_filled = baseline_inpute(X_incomplete, args.method,args.level)
+    X_filled = baseline_impute(X_incomplete, args.method, args.level)
     t_impute = time.time()
+    # print(f'impute time: {t_impute - t_load}')
 
     if hasattr(args,'split_sample') and args.split_sample > 0.:
         if not args.split_test:
@@ -36,20 +38,11 @@ def baseline_mdi(data, args, log_path):
     rmse = np.sqrt(np.mean(diff**2))
 
     t_test = time.time()
+    # print(f'Total Time time: {t_impute - t0}')
 
-    # obj = dict()
-    # obj['args'] = args
-    # obj['rmse'] = rmse
-    # obj['mae'] = mae
-    # obj['load_time'] = t_load - t0
-    # obj['impute_time'] = t_impute - t_load
-    # obj['test_time'] = t_test - t_impute
-    # print('rmse: {:.3g}, mae: {:.3g}'.format(rmse,mae))
-    # pickle.dump(obj, open(log_path + 'result.pkl', "wb"))
     return mae * 10
 
-def baseline_inpute(X_incomplete, method='mean',level=0):
-
+def baseline_impute(X_incomplete, method='mean',level=0):
     if method == 'mean':
         X_filled_mean = SimpleFill().fit_transform(X_incomplete)
         return X_filled_mean
@@ -74,41 +67,40 @@ def baseline_inpute(X_incomplete, method='mean',level=0):
     else:
         from hyperimpute.plugins.imputers import Imputers
         input_missing_x = pd.DataFrame(X_incomplete)
-        out = []
         if method == 'miracle':
             params = {
-                "window": 10,       # best of [10, 20],
-                "n_hidden": 8,      # best of [8,  16, 32, 64], 
-                "max_steps": 2000, # best of [500, 1000, 2000]
-                # "reg_lambda": [0.2, 0.5, 0.7], no diff
-                # "reg_beta": [0.2, 0.5, 0.7], no diff
-                # "reg_m": [0.2, 0.5, 0.7], no diff
+                "window": 10,                      # best of [10, 20],
+                "n_hidden": 8,                     # best of [8,  16, 32, 64], 
+                "max_steps": 2000,                 # best of [500, 1000, 2000]
+                # "reg_lambda": [0.2, 0.5, 0.7],   # no significant diff
+                # "reg_beta": [0.2, 0.5, 0.7],     # no significant diff
+                # "reg_m": [0.2, 0.5, 0.7],        # no significant diff
                 # "DAG_only": True,
             }
         elif method == 'miwae':
             params = {
-                "n_epochs": 3000,         # best of [1000, 2000, 3000]
-                # "latent_size": [1, 5, 10],
-                # "n_hidden": int = 1,
-                "K": 10,                 # [5, 10, 15, 20],
-                # random_state: int = 0,
-                # batch_size: int = 256,
+                "n_epochs": 3000,                  # best of [1000, 2000, 3000]
+                # "latent_size": [1, 5, 10],       # no significant diff
+                # "n_hidden": int = 1,             # no significant diff
+                "K": 10,                           # [5, 10, 15, 20],
+                # random_state: int = 0,           # no significant diff
+                # batch_size: int = 256,           # no significant diff
             }
         elif method == 'gain':
             params = {
-                # batch_size: 256, # no diff
-                "n_epochs": 3000,       # best of [1000, 2000, 3000], # no diff
-                # "hint_rate": [0.8, 0.9, 1], # no diff
-                # "loss_alpha": [5, 10, 20, 30], # no diff
+                # batch_size: 256,                 # no significant diff
+                "n_epochs": 3000,                  # best of [1000, 2000, 3000]
+                # "hint_rate": [0.8, 0.9, 1],      # no significant diff
+                # "loss_alpha": [5, 10, 20, 30],   # no significant diff
             }
 
         # combinations = list(itertools.product(*params.values()))
-        # result = [dict(zip(params.keys(), combo)) for combo in combinations] 
+        # all_configs = [dict(zip(params.keys(), combo)) for combo in combinations] 
         
-        # for config in result:
+        # for config in all_configs:
         plugin = Imputers().get(
             method,
-            **params
+            **params            # change to **config for HPO searching
         )
         
         impute_res = plugin.fit_transform(input_missing_x.copy()).to_numpy()

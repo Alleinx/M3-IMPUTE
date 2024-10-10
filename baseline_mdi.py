@@ -40,6 +40,10 @@ def main():
 
     log_path = './{}/test/{}/{}_{}/'.format(args.domain,args.data,args.method,args.log_dir)
 
+    best_levels = {'mean':0, 'knn':3, 'svd':2, 'mice':2, 'spectral':1}       # The i-th HPO setting of the corresponding method has the best performance
+    args.level = best_levels[args.method] if args.method in best_levels else None
+    # print(args.level)
+
     res = []
     for i in range(5):
         seed = i
