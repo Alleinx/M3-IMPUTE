@@ -114,6 +114,13 @@ bash run_exp3_ablation.sh
 python baseline_mdi.py --method mean uci --train_edge 0.7 --data yacht
 ```
 
+### 5. DownStream Task
+
+```
+python downstream_task.py --method mean
+python downstream_task.py --method m3-impute
+```
+
 ## Results
 
 Our model achieves the following performance on 8 UCI datasets:
