@@ -77,7 +77,7 @@ def get_data(df_X, df_y, node_mode, train_edge_prob, split_sample_ratio, split_b
     x = torch.tensor(node_init, dtype=torch.float)
     y = torch.tensor(df_y, dtype=torch.float)
     
-    print(f'[System] Train Edge Ratio: {train_edge_prob}, Testing Impute Edge Ratio: {1 - train_edge_prob}')
+    print(f'[Config] Known Ratio (i.e. Training Edge Ratio): {train_edge_prob}, Missing Ratio (i.e. Testing Impute Edge Ratio): {1 - train_edge_prob}')
 
     #set seed to fix known/unknwon edges
     torch.manual_seed(seed)
