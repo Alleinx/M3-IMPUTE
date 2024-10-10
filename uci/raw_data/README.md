@@ -4,7 +4,7 @@ The datasets used in this work can obtains online or import from the suppmentary
 
 - UCI (8 datasets): https://github.com/maxiaoba/GRAPE/tree/master/uci/raw_data
   - concrete, energy, housing, kin8nm, naval, power, wine, yacht
-- Extra 17 datasets: include in suppmentary material archive
+- Extra 17 datasets: 
   - airfoil, blood, breast, diabetes, ionosphere, iris, wine-white, protein, spam, letter, abalone, ai4i, cmc, german, steel, libras, california-housing
 
 
