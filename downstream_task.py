@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--comment', type=str, default='v1')
     
     parser.add_argument('--corrupt', type=str, default="mcar")
-    parser.add_argument('--masking_distribution', type=str, default='uniform') # 1 - edge dropout rate
+    parser.add_argument('--masking_distribution', type=str, default='uniform')
 
     args = parser.parse_args() 
     np.random.seed(args.seed)
