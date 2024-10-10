@@ -8,6 +8,7 @@ import torch_geometric.utils as pyg_utils
 from models.egcn import EGCNConv
 from models.egsage import EGraphSage
 from utils.utils import get_activation
+from time import time
 
 def get_gnn(data, args, device):
     model_types = args.model_types.split('_')
@@ -19,7 +20,8 @@ def get_gnn(data, args, device):
         post_hiddens = [args.node_dim]
     else:
         post_hiddens = list(map(int,args.post_hiddens.split('_')))
-    print(model_types, norm_embs, post_hiddens)
+        
+    print(f'[Config] GNN model: {model_types}')
     
     # build model
     total_number_of_nodes, number_of_feature_nodes = data.x.shape
@@ -86,23 +88,8 @@ class GNNStack(torch.nn.Module):
         # shape: (number of feature, hidden dim)
         self.feature_nodes = torch.rand((feature_input_dim, hidden_dim), requires_grad=True, dtype=torch.float32, device=self.device)
 
-    def node_init(self, know_edge_index, know_edge_attr):
-        N = self.number_of_feature + self.number_of_obs_node
-
-        _build_edge_attributes = torch.zeros(N, N).to(self.device)
-        rows, cols = know_edge_index
-        # _build_edge_attributes[rows, cols] = know_edge_attr.squeeze() - self.EPSILON
-        _build_edge_attributes[rows, cols] = know_edge_attr.squeeze()
-        
-        edge_attr_1 = _build_edge_attributes[:self.number_of_obs_node, self.number_of_obs_node:]
-        edge_attr_2 = _build_edge_attributes[self.number_of_obs_node:, :self.number_of_obs_node]
-        build_know_edge_attr = (edge_attr_1 + edge_attr_2.t())              # shape: (number of Obs, Number of Feature)
-        
-        attn_score = build_know_edge_attr                   # (number of Obs node, number of feature)
-        idx = attn_score == 0
-        attn_score[idx] += self.EPSILON
-        # attn_score = build_know_edge_attr + self.EPSILON                    # (number of Obs node, number of feature)
-        obs_node_embs = torch.matmul(attn_score, self.feature_nodes)        # (number of Obs node, hidden dim)
+    def node_init(self, attn_score):
+        obs_node_embs = attn_score @ self.feature_nodes        # (n_of_sample, n_of_feature) x (n_of_feature, d) => (number of sample, d)
         
         # feed into mlp
         obs_node_embs     = F.sigmoid(self.init_obs_mlp(obs_node_embs))
@@ -174,9 +161,9 @@ class GNNStack(torch.nn.Module):
         edge_attr = mlp(torch.cat((x_i,x_j,edge_attr),dim=-1))
         return edge_attr
 
-    def forward(self, x, edge_attr, edge_index):
-        # Modified here: add obs and edge init:
-        x = self.node_init(edge_index, edge_attr) # (Number of Node, Hidden Dim)
+    def forward(self, x, edge_attr, edge_index, train_attr_value):
+        # feature node & sample node init:
+        x = self.node_init(train_attr_value) # (Number of Node, Hidden Dim)
 
         concat_x = []
         for l,(conv_name,conv) in enumerate(zip(self.model_types,self.convs)):
