@@ -1,6 +1,6 @@
 # $M^3$-Impute: Mask-guided Representation Learning for Missing Value Imputation
 
-This repository is the official implementation of [$M^3$-Impute: Mask-guided Representation Learning for Missing Value Imputation](https://arxiv.org/abs/TBA). 
+This repository is the official implementation of [$M^3$-Impute: Mask-guided Representation Learning for Missing Value Imputation](https://arxiv.org/abs/2410.08794). 
 
 ![M3-Impute Model Structure](assets/m3-model.png)
 
