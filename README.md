@@ -81,7 +81,7 @@ Expected folder structure:
 
 We provide the startup parameters used in the M3-Impute experiment, and all options and parameters are specified in the `.sh` file in root folder. For more training options, look at the arguments in `train_mdi.py` and `uci/uci_subparser.py`.
 
-### 1. Experiment 1 (Table 3 in the manuscript)
+### 1. Experiment 1 (Table 2 in the manuscript)
 
 > Imputation under different simulated missingness scenarios.
 
