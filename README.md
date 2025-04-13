@@ -26,7 +26,7 @@ Finally, you need to install `pytorch scatter`. Here are the install command for
 
 ```setup
 # GPU
-pip install pytorch-scatter -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
 
 # CPU
 pip install torch-scatter -f https://data.pyg.org/whl/torch-2.1.0+cpu.html
